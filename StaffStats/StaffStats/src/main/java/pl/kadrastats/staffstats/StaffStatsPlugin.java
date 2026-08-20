@@ -5,6 +5,7 @@ import pl.kadrastats.staffstats.gui.GuiListener;
 import pl.kadrastats.staffstats.listener.AfkListener;
 import pl.kadrastats.staffstats.listener.ConnectionListener;
 import pl.kadrastats.staffstats.listener.InternalAfkDetector;
+import pl.kadrastats.staffstats.listener.PunishmentListener;
 import pl.kadrastats.staffstats.storage.DatabaseManager;
 import pl.kadrastats.staffstats.tracker.ActivityTracker;
 import pl.kadrastats.staffstats.util.LuckPermsHook;
@@ -27,6 +28,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
     private InternalAfkDetector internalAfk;
     private WebhookManager webhook;
     private GuiListener guiListener;
+    private PunishmentListener punishmentListener;
 
     private BukkitTask dailyTask;
     private BukkitTask periodicSaveTask;
@@ -88,6 +90,14 @@ public final class StaffStatsPlugin extends JavaPlugin {
             }
         }
 
+        // --- LibertyBans: zliczanie kar kadry (mute/kick/warn/ban) ---
+        if (getConfig().getBoolean("libertybans.enabled", true) && Bukkit.getPluginManager().getPlugin("LibertyBans") != null) {
+            punishmentListener = new PunishmentListener(this, activityTracker);
+            punishmentListener.register();
+        } else if (getConfig().getBoolean("libertybans.enabled", true)) {
+            getLogger().info("LibertyBans nie wykryty – statystyki kar wyłączone (zainstaluj LibertyBans aby je włączyć).");
+        }
+
         StaffCommand staffCmd = new StaffCommand(this, activityTracker, database);
         getCommand("staff").setExecutor(staffCmd);
         getCommand("staff").setTabCompleter(staffCmd);
@@ -114,6 +124,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
         if (periodicSaveTask != null) { periodicSaveTask.cancel(); periodicSaveTask = null; }
         if (guiRefreshTask != null) { guiRefreshTask.cancel(); guiRefreshTask = null; }
         if (internalAfk != null) { internalAfk.stop(); }
+        if (punishmentListener != null) { punishmentListener.shutdown(); }
         // saveAllOnline wrzuca zapisy do kolejki async – database.shutdown() czeka na nie
         // (awaitTermination) przed zamknięciem połączenia, więc nic nie przepada.
         if (activityTracker != null) activityTracker.saveAllOnline(true);
@@ -134,6 +145,16 @@ public final class StaffStatsPlugin extends JavaPlugin {
         if (wantInternal && !essActive && internalAfk == null) {
             internalAfk = new InternalAfkDetector(this, activityTracker);
             internalAfk.start();
+        }
+
+        // LibertyBans: re-hook przy reloadzie (config lub instalacja mogła się zmienić)
+        if (punishmentListener != null) {
+            punishmentListener.shutdown();
+            punishmentListener = null;
+        }
+        if (getConfig().getBoolean("libertybans.enabled", true) && Bukkit.getPluginManager().getPlugin("LibertyBans") != null) {
+            punishmentListener = new PunishmentListener(this, activityTracker);
+            punishmentListener.register();
         }
 
         // przepianuluj zadania cykliczne (config mógł zmienić interwały)

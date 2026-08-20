@@ -122,6 +122,12 @@ public class WebhookManager {
             desc.append("**Aktywny:** ").append(StaffRecord.formatDuration(active)).append("\n\n");
             desc.append("**Sesje:** ").append(sessions).append(live != null ? " (+1 online)" : "").append("\n");
             if (sessions > 0) desc.append("**Śr. sesja:** ").append(StaffRecord.formatDuration(totalPlay / Math.max(1, sessions))).append("\n");
+            // LibertyBans – kary wydane (widok wg rangi)
+            List<String> punishTypes = pl.kadrastats.staffstats.util.PunishDisplay.typesFor(plugin, group);
+            if (!punishTypes.isEmpty()) {
+                java.util.Map<String, Long> counts = db.getPunishmentCounts(uuid);
+                desc.append("**Kary wydane:** ").append(pl.kadrastats.staffstats.util.PunishDisplay.loreLine(counts, punishTypes)).append("\n");
+            }
             desc.append("\n**Ostatnie logowanie:** <t:").append(lastLogin/1000).append(":F>\n");
             if (live != null) {
                 desc.append("**Status:** 🟢 ONLINE");

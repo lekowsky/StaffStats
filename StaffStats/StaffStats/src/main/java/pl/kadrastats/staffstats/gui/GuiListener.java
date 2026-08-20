@@ -17,6 +17,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -137,6 +138,17 @@ public class GuiListener implements Listener {
         viewer.sendMessage("§7▸ Aktywny: §b" + StaffRecord.formatDuration(active));
         viewer.sendMessage("§7▸ Sesji: §e" + sessions + (live != null ? " §a(+1 online)" : ""));
         viewer.sendMessage("§7▸ Średnia sesja: §f" + (sessions>0 ? StaffRecord.formatDuration(totalPlay / sessions) : "0s"));
+
+        // LibertyBans – kary wydane (widok wg rangi gracza)
+        List<String> punishTypes = pl.kadrastats.staffstats.util.PunishDisplay.typesFor(plugin, group);
+        if (!punishTypes.isEmpty()) {
+            java.util.Map<String, Long> counts = plugin.getDatabase().getPunishmentCounts(targetUuid);
+            viewer.sendMessage("§7▸ Kary wydane:");
+            for (String line : pl.kadrastats.staffstats.util.PunishDisplay.chatLines(counts, punishTypes)) {
+                viewer.sendMessage("    " + line);
+            }
+        }
+
         viewer.sendMessage("§7▸ Ostatnie logowanie: §f" + StaffRecord.formatDate(lastLogin) + " §8(" + StaffRecord.formatAgo(lastLogin) + ")");
         viewer.sendMessage("§7▸ Ostatnie wylogowanie: §f" + (live != null ? "§aONLINE" : StaffRecord.formatDate(lastLogout)));
         if (live != null) {

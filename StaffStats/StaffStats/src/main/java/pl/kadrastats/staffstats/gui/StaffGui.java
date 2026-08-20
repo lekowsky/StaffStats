@@ -3,6 +3,7 @@ package pl.kadrastats.staffstats.gui;
 import pl.kadrastats.staffstats.StaffStatsPlugin;
 import pl.kadrastats.staffstats.storage.StaffRecord;
 import pl.kadrastats.staffstats.tracker.ActivityTracker;
+import pl.kadrastats.staffstats.util.PunishDisplay;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -53,11 +54,14 @@ public class StaffGui {
 
         inv.clear();
 
+        // liczniki kar (LibertyBans) – jedno zapytanie dla całego GUI
+        Map<UUID, Map<String, Long>> punish = plugin.getDatabase().getAllPunishmentCounts();
+
         int start = p * headSlots;
         int slot = 0;
         ActivityTracker tracker = plugin.getActivityTracker();
         for (int i = start; i < all.size() && slot < headSlots; i++, slot++) {
-            inv.setItem(slot, createHead(plugin, tracker, all.get(i)));
+            inv.setItem(slot, createHead(plugin, tracker, all.get(i), punish));
         }
 
         if (all.isEmpty()) {
@@ -139,7 +143,8 @@ public class StaffGui {
         return all;
     }
 
-    private static ItemStack createHead(StaffStatsPlugin plugin, ActivityTracker tracker, StaffRecord rec) {
+    private static ItemStack createHead(StaffStatsPlugin plugin, ActivityTracker tracker, StaffRecord rec,
+                                        Map<UUID, Map<String, Long>> punish) {
         ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         SkullMeta meta = (SkullMeta) head.getItemMeta();
         if (meta != null) {
@@ -172,6 +177,14 @@ public class StaffGui {
             lore.add("§f⚡ Aktywny: §b" + StaffRecord.formatDuration(active));
             lore.add("");
             lore.add("§7Sesje: §e" + rec.sessionCount + (online ? " §a(+online)" : ""));
+
+            // LibertyBans – kary wydane przez tę osobę (widok wg jej rangi)
+            List<String> punishTypes = PunishDisplay.typesFor(plugin, rec.group);
+            if (!punishTypes.isEmpty()) {
+                lore.add("§7⚖ Kary wydane: §f" + PunishDisplay.loreLine(
+                        punish.getOrDefault(rec.uuid, Map.of()), punishTypes));
+            }
+
             lore.add("§7Ostatnie logowanie:");
             lore.add("§f  " + StaffRecord.formatDate(lastLogin) + " §8(" + StaffRecord.formatAgo(lastLogin) + ")");
             lore.add("§7Ostatnie wylogowanie:");

@@ -106,6 +106,17 @@ public class DatabaseManager {
                     );
                     """);
                 st.executeUpdate("CREATE INDEX IF NOT EXISTS idx_afk_uuid_time ON staff_afk(uuid, start_ts);");
+
+                // liczniki kar (LibertyBans) – niezależne od rangi; widok filtruje rangą przy wyświetlaniu
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS staff_punishments (
+                        uuid TEXT NOT NULL,
+                        ptype TEXT NOT NULL,
+                        cnt INTEGER NOT NULL DEFAULT 0,
+                        updated_at INTEGER NOT NULL,
+                        PRIMARY KEY (uuid, ptype)
+                    );
+                    """);
             }
         }
     }
@@ -205,6 +216,65 @@ public class DatabaseManager {
             }
         };
         if (asyncWrites) asyncPool.execute(task); else task.run();
+    }
+
+    // ===== LIBERTYBANS – liczniki kar =====
+
+    /** +1 kara danego typu (ban/mute/warn/kick) dla członka kadry. */
+    public void incrementPunishment(UUID uuid, String type) {
+        if (uuid == null || type == null || type.isBlank()) return;
+        final String t = type.toLowerCase(java.util.Locale.ROOT);
+        Runnable task = () -> {
+            synchronized (lock) {
+                try (PreparedStatement ps = connection.prepareStatement("""
+                        INSERT INTO staff_punishments (uuid, ptype, cnt, updated_at)
+                        VALUES (?, ?, 1, ?)
+                        ON CONFLICT(uuid, ptype) DO UPDATE SET
+                            cnt = cnt + 1,
+                            updated_at = excluded.updated_at
+                        """)) {
+                    ps.setString(1, uuid.toString());
+                    ps.setString(2, t);
+                    ps.setLong(3, System.currentTimeMillis());
+                    ps.executeUpdate();
+                } catch (SQLException e) {
+                    plugin.getLogger().log(Level.WARNING, "incrementPunishment failed", e);
+                }
+            }
+        };
+        if (asyncWrites) asyncPool.execute(task); else task.run();
+    }
+
+    /** Liczniki kar jednego gracza: typ -> liczba. */
+    public Map<String, Long> getPunishmentCounts(UUID uuid) {
+        Map<String, Long> out = new HashMap<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT ptype, cnt FROM staff_punishments WHERE uuid = ?")) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) out.put(rs.getString("ptype"), rs.getLong("cnt"));
+                }
+            } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "getPunishmentCounts", e); }
+            return out;
+        }
+    }
+
+    /** Wszystkie liczniki kar jednym zapytaniem – do budowy GUI. */
+    public Map<UUID, Map<String, Long>> getAllPunishmentCounts() {
+        Map<UUID, Map<String, Long>> out = new HashMap<>();
+        synchronized (lock) {
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT uuid, ptype, cnt FROM staff_punishments")) {
+                while (rs.next()) {
+                    try {
+                        out.computeIfAbsent(UUID.fromString(rs.getString("uuid")), k -> new HashMap<>())
+                           .put(rs.getString("ptype"), rs.getLong("cnt"));
+                    } catch (IllegalArgumentException ignored) {}
+                }
+            } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "getAllPunishmentCounts", e); }
+            return out;
+        }
     }
 
     public void updateLogin(UUID uuid, String name, String group, long loginTs) {
@@ -449,6 +519,10 @@ public class DatabaseManager {
                 try (PreparedStatement ps3 = connection.prepareStatement("DELETE FROM staff_afk WHERE uuid = ?")) {
                     ps3.setString(1, uuid.toString());
                     ps3.executeUpdate();
+                } catch (SQLException ignored) {}
+                try (PreparedStatement ps4 = connection.prepareStatement("DELETE FROM staff_punishments WHERE uuid = ?")) {
+                    ps4.setString(1, uuid.toString());
+                    ps4.executeUpdate();
                 } catch (SQLException ignored) {}
                 return ok;
             } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "reset", e); return false; }

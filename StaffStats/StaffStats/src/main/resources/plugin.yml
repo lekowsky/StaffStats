@@ -3,10 +3,10 @@ version: '${project.version}'
 main: pl.kadrastats.staffstats.StaffStatsPlugin
 api-version: '1.21'
 author: KadraStats
-description: GUI statystyk administracji - online, AFK, logowania. LuckPerms + EssentialsX + Discord Webhook
+description: GUI statystyk administracji - online, AFK, logowania, kary (LibertyBans). LuckPerms + EssentialsX + Discord Webhook
 website: https://github.com/
 prefix: StaffStats
-softdepend: [LuckPerms, Essentials]
+softdepend: [LuckPerms, Essentials, LibertyBans]
 load: POSTWORLD
 folia-supported: true
 

@@ -280,6 +280,17 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         if (sessions > 0) {
             sender.sendMessage(color("&7Śr. sesja: &f" + StaffRecord.formatDuration(totalPlay / Math.max(1, sessions))));
         }
+
+        // LibertyBans – kary wydane (widok wg rangi gracza)
+        List<String> punishTypes = pl.kadrastats.staffstats.util.PunishDisplay.typesFor(plugin, group);
+        if (!punishTypes.isEmpty()) {
+            java.util.Map<String, Long> counts = db.getPunishmentCounts(uuid);
+            sender.sendMessage(color("&7▸ Kary wydane:"));
+            for (String line : pl.kadrastats.staffstats.util.PunishDisplay.chatLines(counts, punishTypes)) {
+                sender.sendMessage(color("    " + line));
+            }
+        }
+
         sender.sendMessage(color("&7Ostatnie logowanie: &f" + StaffRecord.formatDate(lastLogin) + " &8(" + StaffRecord.formatAgo(lastLogin) + ")"));
         if (live != null) {
             sender.sendMessage(color("&7Status: &a🟢 ONLINE" + (live.isAfk() ? " &c[AFK]" : "")));

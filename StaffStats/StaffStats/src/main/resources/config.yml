@@ -1,5 +1,5 @@
-# StaffStats v1.4.0 - Purpur 1.21.10
-# Jedna komenda: /staff  - GUI z główkami (+ /staff top)
+# StaffStats v1.5.0 - Purpur 1.21.10
+# Jedna komenda: /staff  - GUI z główkami (+ /staff top, kary z LibertyBans)
 # Autor: KadraStats
 # https://github.com/
 
@@ -18,6 +18,7 @@ tracked-groups:
   - "admin"
   - "mod"
   - "moderator"
+  - "kidmod"
   - "helper"
   - "pomocnik"
   - "jrhelper"
@@ -32,6 +33,7 @@ group-priority:
   admin: 80
   moderator: 70
   mod: 70
+  kidmod: 65
   helper: 60
   pomocnik: 60
   jrhelper: 50
@@ -63,6 +65,23 @@ integrations:
   internal-afk-detector: false
   # Po ilu minutach bezruchu oznaczyć kadrę jako AFK
   internal-afk-timeout-minutes: 10
+
+# === LibertyBans – statystyki kar kadry ===
+# Zlicza kary WYDANE przez śledzoną kadrę (mute/kick/warn/ban) - event PostPunishEvent.
+# Liczone są WSZYSTKIE typy niezależnie od rangi (dane nie psują się przy zmianie rangi),
+# a poniższa mapa kontroluje tylko CO jest WYŚWIETLANE danej rangi.
+libertybans:
+  enabled: true
+  # Widok kar per ranga. Dostępne typy: mute, kick, warn, ban
+  group-punishment-view:
+    helper: ["mute", "kick"]
+    kidmod: ["mute", "kick", "ban"]
+    moderator: ["mute", "kick", "ban"]
+    admin: ["mute", "kick", "ban"]
+    headadmin: ["mute", "kick", "ban", "warn"]
+    wlasciciel: ["mute", "kick", "ban", "warn"]
+    # rangi niewymienione powyżej używają "default" (puste = bez statystyk kar)
+    default: []
 
 # Discord Webhook
 # Tylko dzienny raport o 22:00 – kto był aktywny w ciągu 24h
