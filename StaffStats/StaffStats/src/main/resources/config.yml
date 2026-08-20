@@ -1,5 +1,5 @@
-# StaffStats v1.3.4 - Purpur 1.21.10
-# Jedna komenda: /staff  - GUI z główkami
+# StaffStats v1.4.0 - Purpur 1.21.10
+# Jedna komenda: /staff  - GUI z główkami (+ /staff top)
 # Autor: KadraStats
 # https://github.com/
 
@@ -45,17 +45,23 @@ track-only-listed-groups: true
 gui:
   title: "&8&lKADRA &7- Statystyki"
   rows: 6
-  # 0-53 sloty
-  # układ automatyczny wg rangi
+  # true = każde otwarcie GUI czyta świeże dane z bazy
+  # false = używa cache do 5s (mniejsze obciążenie przy spamie /staff)
   refresh-on-open: true
+  # true = pokazuj też osoby offline; false = tylko aktualnie online
   show-offline-heads: true
-  # click = pełny raport na chat
+  # Live-refresh otwartego GUI w sekundach (0 = wyłączony)
+  live-refresh-seconds: 5
+  # click = pełny raport na chacie
   click-to-report: true
 
 integrations:
   luckperms: true
   essentials-afk: true
+  # Wbudowany detektor AFK (fallback gdy NIE masz EssentialsX).
+  # Aktywny tylko gdy hook EssentialsX nie działa (ustaw essentials-afk: false aby go wymusić).
   internal-afk-detector: false
+  # Po ilu minutach bezruchu oznaczyć kadrę jako AFK
   internal-afk-timeout-minutes: 10
 
 # Discord Webhook
@@ -81,7 +87,9 @@ webhook:
 storage:
   type: sqlite
   async-writes: true
-  periodic-save-minutes: 0
+  # Co ile minut dopisywać czas online do bazy (ochrona przed utratą danych
+  # przy crash serwera; 0 = wyłączone). Zalecane: 15.
+  periodic-save-minutes: 15
 
 performance:
   luckperms-cache-ms: 30000
@@ -96,6 +104,7 @@ notifications:
   respect-vanish: true
 
 security:
+  # Logowanie anomalii statystyk do konsoli (przycięte sesje, ujemne czasy, AFK > sesja)
   anti-cheat-logging: true
   max-session-hours: 24
   enable-bypass-permission: true
@@ -106,3 +115,4 @@ messages:
   player-not-tracked: "&cTen gracz nie jest w kadrze."
   gui-opening: "&7Otwieram panel kadry..."
   report-header: "&8&m--------&r &b&lRAPORT &8&m--------"
+  top-header: "&8&m----------&r &b&lTOP KADRY &8&m----------"

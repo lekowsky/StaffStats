@@ -5,65 +5,138 @@ import pl.kadrastats.staffstats.storage.StaffRecord;
 import pl.kadrastats.staffstats.tracker.ActivityTracker;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.util.*;
 
 public class StaffGui {
 
-    public static final String TITLE_KEY = "KADRA";
+    public static final String NAV_KEY = "nav";
 
-    public static Inventory build(StaffStatsPlugin plugin) {
-        int rows = Math.max(3, Math.min(6, plugin.getConfig().getInt("gui.rows", 6)));
+    /** Krótkotrwała pamięć podręczna rekordów (dla gui.refresh-on-open: false / zmiany stron). */
+    private static List<StaffRecord> recordCache = null;
+    private static long recordCacheAt = 0;
+
+    /** Buduje nowe GUI na wybranej stronie (0-based). */
+    public static Inventory build(StaffStatsPlugin plugin, int page) {
+        int rows = rows(plugin);
         String title = color(plugin.getConfig().getString("gui.title", "&8&lKADRA &7- Statystyki"));
-        Inventory inv = Bukkit.createInventory(null, rows * 9, title);
+        StaffGuiHolder holder = new StaffGuiHolder(page);
+        Inventory inv = Bukkit.createInventory(holder, rows * 9, title);
+        holder.attach(inv);
+        populate(plugin, inv, holder, page, plugin.getConfig().getBoolean("gui.refresh-on-open", true));
+        return inv;
+    }
 
-        var db = plugin.getDatabase();
-        var tracker = plugin.getActivityTracker();
+    /**
+     * Wypełnia/odświeża ISTNIEJĄCE GUI (paginacja + live-refresh).
+     * Dolny rząd: strzałki ◀ ▶ (gdy więcej niż 1 strona) + info o stronie.
+     */
+    public static void populate(StaffStatsPlugin plugin, Inventory inv, StaffGuiHolder holder, int page, boolean fresh) {
+        List<StaffRecord> all = loadRecords(plugin, fresh);
+        if (!plugin.getConfig().getBoolean("gui.show-offline-heads", true)) {
+            ActivityTracker tracker = plugin.getActivityTracker();
+            all = all.stream().filter(r -> tracker.getSession(r.uuid) != null).toList();
+        }
 
-        List<StaffRecord> all = db.getAll(54);
-        // sort by group priority then playtime
-        all.sort((a,b) -> {
+        int headSlots = Math.max(9, inv.getSize() - 9);
+        int totalPages = Math.max(1, (all.size() + headSlots - 1) / headSlots);
+        int p = Math.max(0, Math.min(page, totalPages - 1));
+        holder.setPage(p);
+        holder.setTotalPages(totalPages);
+
+        inv.clear();
+
+        int start = p * headSlots;
+        int slot = 0;
+        ActivityTracker tracker = plugin.getActivityTracker();
+        for (int i = start; i < all.size() && slot < headSlots; i++, slot++) {
+            inv.setItem(slot, createHead(plugin, tracker, all.get(i)));
+        }
+
+        if (all.isEmpty()) {
+            inv.setItem(inv.getSize() / 2, infoItem(plugin));
+        }
+
+        bottomRow(plugin, inv, p, totalPages, all.size());
+        filler(inv);
+    }
+
+    private static void bottomRow(StaffStatsPlugin plugin, Inventory inv, int page, int totalPages, int totalStaff) {
+        int base = inv.getSize() - 9;
+        if (totalPages > 1) {
+            inv.setItem(base, navItem(plugin, "prev", "§e◀ Poprzednia strona", page));
+            inv.setItem(base + 8, navItem(plugin, "next", "§eNastępna strona ▶", page));
+        }
+        ItemStack info = new ItemStack(Material.BOOK);
+        ItemMeta im = info.getItemMeta();
+        if (im != null) {
+            im.setDisplayName("§bKadra §7- strona §f" + (page + 1) + "§7/§f" + totalPages);
+            List<String> lore = new ArrayList<>();
+            lore.add("§7Osób w bazie: §f" + totalStaff);
+            lore.add("§7Sortowanie: §franga → czas aktywny");
+            lore.add("");
+            lore.add("§e▶ Kliknij główkę = pełny raport");
+            im.setLore(lore);
+            info.setItemMeta(im);
+        }
+        inv.setItem(base + 4, info);
+    }
+
+    private static ItemStack navItem(StaffStatsPlugin plugin, String dir, String name, int page) {
+        ItemStack it = new ItemStack(Material.ARROW);
+        ItemMeta im = it.getItemMeta();
+        if (im != null) {
+            im.setDisplayName(name);
+            im.getPersistentDataContainer().set(new NamespacedKey(plugin, NAV_KEY), PersistentDataType.STRING, dir);
+            it.setItemMeta(im);
+        }
+        return it;
+    }
+
+    private static ItemStack infoItem(StaffStatsPlugin plugin) {
+        ItemStack info = new ItemStack(Material.PAPER);
+        var im = info.getItemMeta();
+        im.setDisplayName("§cBrak danych kadry");
+        List<String> lore = new ArrayList<>();
+        lore.add("§7Nie znaleziono żadnych administratorów w bazie.");
+        lore.add("");
+        lore.add("§ePoczekaj aż ktoś z kadry wejdzie na serwer,");
+        lore.add("§ealbo sprawdź tracked-groups w config.yml");
+        lore.add("");
+        lore.add("§8Tracked groups: " + String.join(", ", plugin.getActivityTracker().getTrackedGroups()));
+        im.setLore(lore);
+        info.setItemMeta(im);
+        return info;
+    }
+
+    private static void filler(Inventory inv) {
+        ItemStack filler = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+        var meta = filler.getItemMeta();
+        meta.setDisplayName("§8");
+        filler.setItemMeta(meta);
+        for (int i = 0; i < inv.getSize(); i++) if (inv.getItem(i) == null) inv.setItem(i, filler);
+    }
+
+    private static List<StaffRecord> loadRecords(StaffStatsPlugin plugin, boolean fresh) {
+        long now = System.currentTimeMillis();
+        if (!fresh && recordCache != null && now - recordCacheAt < 5000) return recordCache;
+        List<StaffRecord> all = plugin.getDatabase().getAll(1000);
+        all.sort((a, b) -> {
             int pa = getPriority(plugin, a.group);
             int pb = getPriority(plugin, b.group);
             if (pa != pb) return Integer.compare(pb, pa);
             return Long.compare(b.activeMs(), a.activeMs());
         });
-
-        int slot = 0;
-        for (StaffRecord rec : all) {
-            if (slot >= inv.getSize()) break;
-            inv.setItem(slot++, createHead(plugin, tracker, rec));
-        }
-
-        if (all.isEmpty()) {
-            // info item center
-            ItemStack info = new ItemStack(Material.PAPER);
-            var im = info.getItemMeta();
-            im.setDisplayName("§cBrak danych kadry");
-            List<String> lore = new ArrayList<>();
-            lore.add("§7Nie znaleziono żadnych administratorów w bazie.");
-            lore.add("");
-            lore.add("§ePoczekaj aż ktoś z kadry wejdzie na serwer,");
-            lore.add("§ealbo dodaj ręcznie przez /staff <nick>");
-            lore.add("");
-            lore.add("§8Tracked groups: " + String.join(", ", tracker.getTrackedGroups()));
-            im.setLore(lore);
-            info.setItemMeta(im);
-            inv.setItem(inv.getSize()/2, info);
-        }
-
-        // fill empty with glass
-        ItemStack filler = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
-        var meta = filler.getItemMeta();
-        meta.setDisplayName("§8");
-        filler.setItemMeta(meta);
-        for (int i=0;i<inv.getSize();i++) if (inv.getItem(i)==null) inv.setItem(i, filler);
-
-        return inv;
+        recordCache = all;
+        recordCacheAt = now;
+        return all;
     }
 
     private static ItemStack createHead(StaffStatsPlugin plugin, ActivityTracker tracker, StaffRecord rec) {
@@ -115,6 +188,10 @@ public class StaffGui {
             head.setItemMeta(meta);
         }
         return head;
+    }
+
+    private static int rows(StaffStatsPlugin plugin) {
+        return Math.max(3, Math.min(6, plugin.getConfig().getInt("gui.rows", 6)));
     }
 
     private static int getPriority(StaffStatsPlugin plugin, String group) {

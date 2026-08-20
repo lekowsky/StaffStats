@@ -4,6 +4,7 @@ import pl.kadrastats.staffstats.command.StaffCommand;
 import pl.kadrastats.staffstats.gui.GuiListener;
 import pl.kadrastats.staffstats.listener.AfkListener;
 import pl.kadrastats.staffstats.listener.ConnectionListener;
+import pl.kadrastats.staffstats.listener.InternalAfkDetector;
 import pl.kadrastats.staffstats.storage.DatabaseManager;
 import pl.kadrastats.staffstats.tracker.ActivityTracker;
 import pl.kadrastats.staffstats.util.LuckPermsHook;
@@ -23,9 +24,13 @@ public final class StaffStatsPlugin extends JavaPlugin {
     private ActivityTracker activityTracker;
     private LuckPermsHook luckPermsHook;
     private AfkListener afkListener;
+    private InternalAfkDetector internalAfk;
     private WebhookManager webhook;
+    private GuiListener guiListener;
 
     private BukkitTask dailyTask;
+    private BukkitTask periodicSaveTask;
+    private BukkitTask guiRefreshTask;
     private LocalDate lastWebhookSentDate = null;
     private ZonedDateTime nextWebhookRun = null;
 
@@ -36,7 +41,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
-        // AUTO-UPDATE CONFIG – nadpisywanie / merge po wgraniu nowego JARa
+        // AUTO-UPDATE CONFIG – dopisywanie brakujących kluczy po wgraniu nowego JARa
         try {
             new pl.kadrastats.staffstats.util.ConfigUpdater(this).run();
             reloadConfig();
@@ -61,13 +66,26 @@ public final class StaffStatsPlugin extends JavaPlugin {
         activityTracker = new ActivityTracker(this, database, luckPermsHook);
 
         webhook = new WebhookManager(this);
-        
-        Bukkit.getPluginManager().registerEvents(new ConnectionListener(this, activityTracker, webhook), this);
-        Bukkit.getPluginManager().registerEvents(new GuiListener(this), this);
 
+        Bukkit.getPluginManager().registerEvents(new ConnectionListener(this, activityTracker, webhook), this);
+        guiListener = new GuiListener(this);
+        Bukkit.getPluginManager().registerEvents(guiListener, this);
+
+        // --- AFK: EssentialsX (preferowany) albo wbudowany detektor ---
+        boolean essentialsHooked = false;
         if (getConfig().getBoolean("integrations.essentials-afk", true) && Bukkit.getPluginManager().getPlugin("Essentials") != null) {
             afkListener = new AfkListener(this, activityTracker);
             afkListener.register();
+            essentialsHooked = true;
+        }
+        if (getConfig().getBoolean("integrations.internal-afk-detector", false)) {
+            if (!essentialsHooked) {
+                internalAfk = new InternalAfkDetector(this, activityTracker);
+                internalAfk.start();
+            } else {
+                getLogger().info("internal-afk-detector pominięty – aktywny hook EssentialsX "
+                        + "(ustaw integrations.essentials-afk: false aby użyć wbudowanego detektora).");
+            }
         }
 
         StaffCommand staffCmd = new StaffCommand(this, activityTracker, database);
@@ -80,12 +98,8 @@ public final class StaffStatsPlugin extends JavaPlugin {
 
         Bukkit.getOnlinePlayers().forEach(p -> activityTracker.handleJoin(p, true));
 
-        int period = getConfig().getInt("storage.periodic-save-minutes", 0);
-        if (period > 0) {
-            Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> activityTracker.saveAllOnline(false),
-                    period * 60L * 20L, period * 60L * 20L);
-        }
-
+        schedulePeriodicSave();
+        scheduleGuiRefresh();
         scheduleDailySummary();
 
         getLogger().info("StaffStats v" + getDescription().getVersion() + " enabled. /staff GUI ready.");
@@ -97,6 +111,11 @@ public final class StaffStatsPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (dailyTask != null) { dailyTask.cancel(); dailyTask = null; }
+        if (periodicSaveTask != null) { periodicSaveTask.cancel(); periodicSaveTask = null; }
+        if (guiRefreshTask != null) { guiRefreshTask.cancel(); guiRefreshTask = null; }
+        if (internalAfk != null) { internalAfk.stop(); }
+        // saveAllOnline wrzuca zapisy do kolejki async – database.shutdown() czeka na nie
+        // (awaitTermination) przed zamknięciem połączenia, więc nic nie przepada.
         if (activityTracker != null) activityTracker.saveAllOnline(true);
         if (database != null) database.shutdown();
         if (webhook != null) webhook.shutdown();
@@ -106,9 +125,51 @@ public final class StaffStatsPlugin extends JavaPlugin {
         reloadConfig();
         if (activityTracker != null) activityTracker.reloadConfigCache();
         if (webhook != null) webhook.reload();
-        // reschedule webhook
+
+        // internal AFK: restart wg nowego configa (ewentualne utworzenie, gdy wcześniej nie był potrzebny)
+        boolean wantInternal = getConfig().getBoolean("integrations.internal-afk-detector", false);
+        boolean essActive = getConfig().getBoolean("integrations.essentials-afk", true)
+                && Bukkit.getPluginManager().getPlugin("Essentials") != null;
+        if (internalAfk != null) internalAfk.restart();
+        if (wantInternal && !essActive && internalAfk == null) {
+            internalAfk = new InternalAfkDetector(this, activityTracker);
+            internalAfk.start();
+        }
+
+        // przepianuluj zadania cykliczne (config mógł zmienić interwały)
+        schedulePeriodicSave();
+        scheduleGuiRefresh();
         scheduleDailySummary();
         getLogger().info("StaffStats reload complete.");
+    }
+
+    /**
+     * Okresowy zapis statystyk (default: co 15 min) – ogranicza utratę danych przy crashu.
+     * 0 = wyłączone.
+     */
+    private void schedulePeriodicSave() {
+        if (periodicSaveTask != null) { periodicSaveTask.cancel(); periodicSaveTask = null; }
+        int minutes = getConfig().getInt("storage.periodic-save-minutes", 15);
+        if (minutes > 0) {
+            periodicSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this,
+                    () -> activityTracker.saveAllOnline(false),
+                    minutes * 60L * 20L, minutes * 60L * 20L);
+        }
+    }
+
+    /** Live-refresh otwartego GUI (gui.live-refresh-seconds, 0 = wyłączone). */
+    private void scheduleGuiRefresh() {
+        if (guiRefreshTask != null) { guiRefreshTask.cancel(); guiRefreshTask = null; }
+        int seconds = getConfig().getInt("gui.live-refresh-seconds", 5);
+        if (seconds > 0 && guiListener != null) {
+            guiRefreshTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+                try {
+                    guiListener.refreshOpenGuis();
+                } catch (Exception ex) {
+                    getLogger().log(Level.WARNING, "GUI refresh error", ex);
+                }
+            }, seconds * 20L, seconds * 20L);
+        }
     }
 
     private void scheduleDailySummary() {

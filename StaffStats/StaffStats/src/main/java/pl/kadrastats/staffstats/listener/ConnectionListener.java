@@ -24,8 +24,12 @@ public class ConnectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent e) {
-        // Opóźnienie 1s – daj LuckPerms czas na załadowanie danych
+        // Opóźnienie 1s – daj LuckPerms czas na załadowanie danych.
+        // Guard isOnline(): gracz wyrzucony/wychodzący w tę sekundę NIE może dostać
+        // sesji zombie (wcześniej: quit obsłużony PRZED join → sesja nigdy nie domknięta,
+        // gracz świecił się "ONLINE" do końca życia serwera).
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (!e.getPlayer().isOnline()) return;
             tracker.handleJoin(e.getPlayer(), false);
             // Webhook join jest domyślnie WYŁĄCZONY – WebhookManager sam sprawdzi config
             if (webhook.isEnabled() && tracker.shouldTrack(e.getPlayer())) {

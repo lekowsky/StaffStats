@@ -196,7 +196,9 @@ public class WebhookManager {
         } catch (Exception ignored) {}
 
         JsonObject embed = new JsonObject();
-        embed.addProperty("title", "📊 Dzienny raport kadry – 22:00");
+        int hh = plugin.getConfig().getInt("webhook.daily-summary-hour", 22);
+        int mm = plugin.getConfig().getInt("webhook.daily-summary-minute", 0);
+        embed.addProperty("title", "📊 Dzienny raport kadry – " + String.format("%02d:%02d", hh, mm));
         embed.addProperty("color", 3447003);
         StringBuilder sb = new StringBuilder();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.of("Europe/Warsaw"));
@@ -320,6 +322,14 @@ public class WebhookManager {
     }
 
     public void shutdown() {
-        if (pool != null) pool.shutdownNow();
+        if (pool == null) return;
+        // czekaj do 3s na wysłanie zgromadzonych webhooków (shutdownNow gubiłby kolejkę)
+        pool.shutdown();
+        try {
+            if (!pool.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) pool.shutdownNow();
+        } catch (InterruptedException e) {
+            pool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }
