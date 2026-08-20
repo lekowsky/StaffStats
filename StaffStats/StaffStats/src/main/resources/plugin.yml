@@ -1,0 +1,36 @@
+name: StaffStats
+version: '${project.version}'
+main: pl.kadrastats.staffstats.StaffStatsPlugin
+api-version: '1.21'
+author: KadraStats
+description: GUI statystyk administracji - online, AFK, logowania. LuckPerms + EssentialsX + Discord Webhook
+website: https://github.com/
+prefix: StaffStats
+softdepend: [LuckPerms, Essentials]
+load: POSTWORLD
+folia-supported: true
+
+commands:
+  staff:
+    description: Otwórz GUI statystyk kadry
+    usage: /staff [gracz]
+    permission: staffstats.view
+    aliases: [kadra, staffstats, sstats, ss]
+  staffstats:
+    description: Alias do /staff
+    usage: /staff
+    permission: staffstats.view
+
+permissions:
+  staffstats.view:
+    description: Podgląd statystyk kadry / GUI
+    default: op
+  staffstats.admin:
+    description: Zarządzanie pluginem
+    default: op
+  staffstats.bypass:
+    description: Wyłączenie ze statystyk
+    default: false
+  staffstats.notify:
+    description: Powiadomienia
+    default: op

@@ -1,0 +1,108 @@
+# StaffStats v1.3.4 - Purpur 1.21.10
+# Jedna komenda: /staff  - GUI z główkami
+# Autor: KadraStats
+# https://github.com/
+
+# === AUTO-UPDATE CONFIG ===
+# true = po wgraniu nowego JARa automatycznie dopisze brakujące opcje do config.yml
+# robi backup: config.yml.backup-YYYYMMDD-HHMMSS
+config-auto-update: true
+# UWAGA: true = CAŁKOWICIE nadpisze config.yml plikiem z JARa przy starcie (zrobi backup!)
+# Ustaw na true tylko jeśli chcesz zresetować config do domyślnego
+config-force-overwrite: false
+
+# Rangi LuckPerms do śledzenia
+tracked-groups:
+  - "wlasciciel"
+  - "headadmin"
+  - "admin"
+  - "mod"
+  - "moderator"
+  - "helper"
+  - "pomocnik"
+  - "jrhelper"
+  - "architekt"
+  - "builder"
+
+# Priorytet sortowania (wyższy = wyżej w GUI)
+# używane też do sortowania głów w GUI – pobierane z LuckPerms primary group
+group-priority:
+  wlasciciel: 100
+  headadmin: 90
+  admin: 80
+  moderator: 70
+  mod: 70
+  helper: 60
+  pomocnik: 60
+  jrhelper: 50
+  architekt: 40
+  builder: 40
+  default: 10
+
+track-only-listed-groups: true
+
+# GUI
+gui:
+  title: "&8&lKADRA &7- Statystyki"
+  rows: 6
+  # 0-53 sloty
+  # układ automatyczny wg rangi
+  refresh-on-open: true
+  show-offline-heads: true
+  # click = pełny raport na chat
+  click-to-report: true
+
+integrations:
+  luckperms: true
+  essentials-afk: true
+  internal-afk-detector: false
+  internal-afk-timeout-minutes: 10
+
+# Discord Webhook
+# Tylko dzienny raport o 22:00 – kto był aktywny w ciągu 24h
+webhook:
+  enabled: false
+  # Wklej URL webhooka z Discorda tutaj:
+  url: "https://discord.com/api/webhooks/TWOJE_ID/TWOJ_TOKEN"
+  username: "StaffStats"
+  avatar-url: "https://i.imgur.com/8Km9tLL.png"
+  # Wyłączone - tylko daily summary
+  send-on-staff-join: false
+  send-on-staff-quit: false
+  # Podsumowanie dzienne o danej godzinie (Europe/Warsaw), -1 = wyłącz
+  daily-summary-hour: 22
+  daily-summary-minute: 0
+  # Minimalna długość sesji żeby wysłać quit webhook (minuty)
+  min-quit-session-minutes: 5
+  # Kolor embedów
+  color-join: 65280
+  color-quit: 16711680
+
+storage:
+  type: sqlite
+  async-writes: true
+  periodic-save-minutes: 0
+
+performance:
+  luckperms-cache-ms: 30000
+  command-cooldown-seconds: 2
+  max-top-results: 54
+  min-session-seconds: 30
+
+notifications:
+  staff-join-notify: false
+  staff-quit-notify: false
+  notify-permission: "staffstats.notify"
+  respect-vanish: true
+
+security:
+  anti-cheat-logging: true
+  max-session-hours: 24
+  enable-bypass-permission: true
+
+messages:
+  prefix: "&8[&bStaffStats&8] &7"
+  no-permission: "&cBrak uprawnień."
+  player-not-tracked: "&cTen gracz nie jest w kadrze."
+  gui-opening: "&7Otwieram panel kadry..."
+  report-header: "&8&m--------&r &b&lRAPORT &8&m--------"
