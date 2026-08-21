@@ -63,8 +63,12 @@ public final class StaffStatsPlugin extends JavaPlugin {
         }
 
         if (getConfig().getBoolean("integrations.luckperms", true)) {
-            luckPermsHook = new LuckPermsHook(this);
-            luckPermsHook.init();
+            try {
+                luckPermsHook = new LuckPermsHook(this);
+                luckPermsHook.init();
+            } catch (Throwable t) {
+                getLogger().warning("LuckPerms hook pominięty: " + t);
+            }
         }
 
         activityTracker = new ActivityTracker(this, database, luckPermsHook);
