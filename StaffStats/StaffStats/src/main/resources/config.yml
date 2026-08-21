@@ -1,5 +1,5 @@
-# StaffStats v1.3.4 - Purpur 1.21.10
-# Jedna komenda: /staff  - GUI z główkami
+# StaffStats v1.6.1 - Purpur 1.21.10
+# /staff - GUI z główkami (+ /staff top, kary z LibertyBans, cykl tygodniowy)
 # Autor: KadraStats
 # https://github.com/
 
@@ -18,6 +18,7 @@ tracked-groups:
   - "admin"
   - "mod"
   - "moderator"
+  - "kidmod"
   - "helper"
   - "pomocnik"
   - "jrhelper"
@@ -32,6 +33,7 @@ group-priority:
   admin: 80
   moderator: 70
   mod: 70
+  kidmod: 65
   helper: 60
   pomocnik: 60
   jrhelper: 50
@@ -45,21 +47,69 @@ track-only-listed-groups: true
 gui:
   title: "&8&lKADRA &7- Statystyki"
   rows: 6
-  # 0-53 sloty
-  # układ automatyczny wg rangi
+  # true = każde otwarcie GUI czyta świeże dane z bazy
+  # false = używa cache do 5s (mniejsze obciążenie przy spamie /staff)
   refresh-on-open: true
+  # true = pokazuj też osoby offline; false = tylko aktualnie online
   show-offline-heads: true
-  # click = pełny raport na chat
+  # Live-refresh otwartego GUI w sekundach (0 = wyłączony)
+  live-refresh-seconds: 5
+  # click = pełny raport na chacie
   click-to-report: true
 
 integrations:
   luckperms: true
   essentials-afk: true
+  # Wbudowany detektor AFK (fallback gdy NIE masz EssentialsX).
+  # Aktywny tylko gdy hook EssentialsX nie działa (ustaw essentials-afk: false aby go wymusić).
   internal-afk-detector: false
+  # Po ilu minutach bezruchu oznaczyć kadrę jako AFK
   internal-afk-timeout-minutes: 10
 
+# === LibertyBans – statystyki kar kadry ===
+# Zlicza kary WYDANE przez śledzoną kadrę (mute/kick/warn/ban) - event PostPunishEvent.
+# Liczone są WSZYSTKIE typy niezależnie od rangi (dane nie psują się przy zmianie rangi),
+# a poniższa mapa kontroluje tylko CO jest WYŚWIETLANE danej rangi.
+libertybans:
+  enabled: true
+  # Widok kar per ranga. Dostępne typy: mute, kick, warn, ban
+  group-punishment-view:
+    helper: ["mute", "kick"]
+    kidmod: ["mute", "kick", "ban"]
+    moderator: ["mute", "kick", "ban"]
+    admin: ["mute", "kick", "ban"]
+    headadmin: ["mute", "kick", "ban", "warn"]
+    wlasciciel: ["mute", "kick", "ban", "warn"]
+    # rangi niewymienione powyżej używają "default" (puste = bez statystyk kar)
+    default: []
+
+# === CYKL TYGODNIOWY (1.6.0+) ===
+# Co interval-days dni plugin automatycznie:
+#   1) doliczy trwające sesje i poczeka na zapis do bazy,
+#   2) wyśle webhook z podsumowaniem tygodnia (TOP aktywność, TOP kary, nieobecni),
+#   3) zarchiwizuje tydzień w tabeli staff_weeks (historia zostaje!),
+#   4) wyczyści CAŁY postęp kadry (czasy, sesje, AFK, kary),
+#   5) opcjonalnie zrestartuje serwer (restart-command).
+# Kotwica cyklu jest w bazie (staff_meta) - jeśli serwer był wyłączony w terminie,
+# reset dogoni cykl po starcie. Godzina at-hour:at-minute (Europe/Warsaw) przesuwa
+# reset na najbliższe okno po upływie interwału.
+weekly-reset:
+  enabled: true
+  # co ile dni (minimum 1)
+  interval-days: 7
+  # docelowa godzina resetu (0-23)
+  at-hour: 4
+  # docelowa minuta (0-59)
+  at-minute: 0
+  # czy zrestartować serwer po resecie (zalecane)
+  restart-server: true
+  # komenda restartu wykonana z konsoli (np. "restart" albo "stop")
+  restart-command: "restart"
+  # czy wysłać webhook z podsumowaniem tygodnia PRZED resem (zalecane)
+  send-webhook: true
+
 # Discord Webhook
-# Tylko dzienny raport o 22:00 – kto był aktywny w ciągu 24h
+# Dzienny raport + podsumowanie tygodnia (weekly-reset)
 webhook:
   enabled: false
   # Wklej URL webhooka z Discorda tutaj:
@@ -81,7 +131,9 @@ webhook:
 storage:
   type: sqlite
   async-writes: true
-  periodic-save-minutes: 0
+  # Co ile minut dopisywać czas online do bazy (ochrona przed utratą danych
+  # przy crash serwera; 0 = wyłączone). Zalecane: 15.
+  periodic-save-minutes: 15
 
 performance:
   luckperms-cache-ms: 30000
@@ -96,6 +148,7 @@ notifications:
   respect-vanish: true
 
 security:
+  # Logowanie anomalii statystyk do konsoli (przycięte sesje, ujemne czasy, AFK > sesja)
   anti-cheat-logging: true
   max-session-hours: 24
   enable-bypass-permission: true
@@ -106,3 +159,4 @@ messages:
   player-not-tracked: "&cTen gracz nie jest w kadrze."
   gui-opening: "&7Otwieram panel kadry..."
   report-header: "&8&m--------&r &b&lRAPORT &8&m--------"
+  top-header: "&8&m----------&r &b&lTOP KADRY &8&m----------"

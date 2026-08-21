@@ -22,10 +22,24 @@ public class LuckPermsHook {
     }
 
     public boolean init() {
-        try { api = LuckPermsProvider.get();
-            plugin.getLogger().info("LuckPerms hooked: " + api.getPluginMetadata().getVersion());
+        try {
+            api = LuckPermsProvider.get();
+            // wersja przez opis pluginu (bukkit API) – NIE przez LuckPerms API:
+            // getPluginMetadata() istnieje dopiero od LP 5.1 i przy starszej kopii
+            // interfejsu LP w classpath rzuca NoSuchMethodError (Error, nie Exception!)
+            String ver = "?";
+            try {
+                org.bukkit.plugin.Plugin lp = org.bukkit.Bukkit.getPluginManager().getPlugin("LuckPerms");
+                if (lp != null && lp.getDescription() != null && lp.getDescription().getVersion() != null) {
+                    ver = lp.getDescription().getVersion();
+                }
+            } catch (Throwable ignored) {}
+            plugin.getLogger().info("LuckPerms hooked: " + ver);
             return true;
-        } catch (Exception e) { return false; }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("LuckPerms hook failed: " + t);
+            return false;
+        }
     }
     public boolean isActive() { return api != null; }
 

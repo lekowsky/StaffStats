@@ -22,11 +22,13 @@ import java.util.stream.Collectors;
  *   reload
  *   reset <gracz>
  *   webhook <test|daily|schedule|<nick>>
+ *   weekly <status|reset>  (cykl tygodniowy)
  *   help
  *
  * Użycie gracza:
- *   /staff              – otwiera GUI
+ *   /staff              – otwiera GUI (paginowane)
  *   /staff <nick>       – szybki raport w chacie
+ *   /staff top [ranga]  – ranking kadry (czas aktywny)
  */
 public class StaffCommand implements CommandExecutor, TabCompleter {
 
@@ -34,6 +36,10 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
     private final ActivityTracker tracker;
     private final DatabaseManager db;
     private final Map<UUID, Long> cooldown = new HashMap<>();
+
+    /** Cache nazw graczy do tab-complete (30 s) – wcześniej każde TAB uderzało w bazę na main thread. */
+    private List<String> namesCache = new ArrayList<>();
+    private long namesCacheAt = 0;
 
     public StaffCommand(StaffStatsPlugin plugin, ActivityTracker tracker, DatabaseManager db) {
         this.plugin = plugin;
@@ -49,6 +55,12 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // sprzątanie cooldownów (mapa rosła w nieskończoność)
+        long nowSec = System.currentTimeMillis() / 1000;
+        if (cooldown.size() > 200) {
+            cooldown.values().removeIf(t -> nowSec - t > 300);
+        }
+
         if (args.length == 0) {
             return openGui(sender, label);
         }
@@ -62,9 +74,31 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // --- CYKL TYGODNIOWY (1.6.0) ---
+        if (sub.equals("weekly")) {
+            if (!sender.hasPermission("staffstats.admin")) {
+                sender.sendMessage(color("&cNie masz uprawnień (staffstats.admin)."));
+                return true;
+            }
+            String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+            switch (action) {
+                case "reset" -> {
+                    sender.sendMessage(color("&e[StaffStats] Wymuszam reset tygodnia..."));
+                    plugin.getWeeklyReset().forceReset(sender);
+                }
+                case "status" -> sendWeeklyStatus(sender, label);
+                default -> sender.sendMessage(color("&cUżycie: /" + label + " weekly <status|reset>"));
+            }
+            return true;
+        }
+
         if (sub.equals("help")) {
             sendHelp(sender, label);
             return true;
+        }
+
+        if (sub.equals("top")) {
+            return handleTop(sender, args);
         }
 
         if (sub.equals("reset") && sender.hasPermission("staffstats.admin")) {
@@ -84,7 +118,6 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
 
         // --- /staff <nick> = szybki raport ---
         // Jeśli pierwszy argument nie jest znaną subkomendą, traktuj jako nick
-        // Sprawdź czy to rzeczywiście gracz z bazy lub online, żeby uniknąć mylenia komend
         if (!isKnownSubcommand(sub)) {
             OfflinePlayer target = Bukkit.getOfflinePlayer(args[0]);
             sendQuickReport(sender, target.getUniqueId());
@@ -93,6 +126,34 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
 
         // fallback – otwórz GUI
         return openGui(sender, label);
+    }
+
+    /** /staff top [ranga] – ranking kadry po czasie aktywnym (z doliczeniem sesji live). */
+    private boolean handleTop(CommandSender sender, String[] args) {
+        String group = args.length > 1 ? args[1] : null;
+        int limit = Math.max(1, Math.min(15, plugin.getConfig().getInt("performance.max-top-results", 54)));
+        List<StaffRecord> top = db.getTop(group, limit);
+
+        sender.sendMessage(color(plugin.getConfig().getString("messages.top-header",
+                "&8&m----------&r &b&lTOP KADRY &8&m----------")));
+        if (group != null) sender.sendMessage(color("&7Ranga: &f" + group));
+        if (top.isEmpty()) {
+            sender.sendMessage(color("&7Brak danych" + (group != null ? " dla rangi " + group : "") + "."));
+        } else {
+            int i = 1;
+            for (StaffRecord r : top) {
+                ActivityTracker.Session live = tracker.getSession(r.uuid);
+                long play = r.totalPlaytimeMs + (live != null ? live.currentPlaytime() : 0);
+                long afk = r.totalAfkMs + (live != null ? live.currentAfk() : 0);
+                long active = Math.max(0, play - afk);
+                String status = live != null ? (live.isAfk() ? " &c💤" : " &a●") : "";
+                sender.sendMessage(color("&e" + i++ + ". &f" + r.name
+                        + " &8[" + (r.group != null ? r.group : "?") + "]&7 – &b"
+                        + StaffRecord.formatDuration(active) + status));
+            }
+        }
+        sender.sendMessage(color("&8&m-------------------------------"));
+        return true;
     }
 
     private boolean handleWebhook(CommandSender sender, String label, String[] args) {
@@ -154,7 +215,7 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
 
     private boolean openGui(CommandSender sender, String label) {
         if (!(sender instanceof Player p)) {
-            sender.sendMessage("Użyj: /" + label + " <nick>  (konsola nie ma GUI)");
+            sender.sendMessage("Użyj: /" + label + " <nick> | /" + label + " top  (konsola nie ma GUI)");
             List<StaffRecord> top = db.getTop(null, 10);
             sender.sendMessage("=== TOP KADRA ===");
             int i = 1;
@@ -176,7 +237,7 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
 
         p.sendMessage(color(plugin.getConfig().getString("messages.gui-opening", "&7Otwieram panel kadry...")));
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            var inv = StaffGui.build(plugin);
+            var inv = StaffGui.build(plugin, 0);
             Bukkit.getScheduler().runTask(plugin, () -> p.openInventory(inv));
         });
         return true;
@@ -186,6 +247,7 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(color("&8&m----------&r &bStaffStats &8&m----------"));
         sender.sendMessage(color("&e/" + label + " &7– otwórz GUI kadry"));
         sender.sendMessage(color("&e/" + label + " <nick> &7– szybki raport w chacie"));
+        sender.sendMessage(color("&e/" + label + " top [ranga] &7– ranking kadry"));
         if (sender.hasPermission("staffstats.admin")) {
             sender.sendMessage(color("&cAdmin:"));
             sender.sendMessage(color(" &7/" + label + " reload &8- przeładuj config"));
@@ -194,6 +256,8 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(color(" &7/" + label + " webhook daily &8- wymuś raport 24h"));
             sender.sendMessage(color(" &7/" + label + " webhook schedule &8- kiedy następny raport"));
             sender.sendMessage(color(" &7/" + label + " webhook <nick> &8- raport gracza na DC"));
+            sender.sendMessage(color(" &7/" + label + " weekly status &8- następny reset tygodnia"));
+            sender.sendMessage(color(" &7/" + label + " weekly reset &8- wymuś reset tygodnia"));
         }
         sender.sendMessage(color("&8&m----------------------------------"));
     }
@@ -237,6 +301,17 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         if (sessions > 0) {
             sender.sendMessage(color("&7Śr. sesja: &f" + StaffRecord.formatDuration(totalPlay / Math.max(1, sessions))));
         }
+
+        // LibertyBans – kary wydane (widok wg rangi gracza)
+        List<String> punishTypes = pl.kadrastats.staffstats.util.PunishDisplay.typesFor(plugin, group);
+        if (!punishTypes.isEmpty()) {
+            java.util.Map<String, Long> counts = db.getPunishmentCounts(uuid);
+            sender.sendMessage(color("&7▸ Kary wydane:"));
+            for (String line : pl.kadrastats.staffstats.util.PunishDisplay.chatLines(counts, punishTypes)) {
+                sender.sendMessage(color("    " + line));
+            }
+        }
+
         sender.sendMessage(color("&7Ostatnie logowanie: &f" + StaffRecord.formatDate(lastLogin) + " &8(" + StaffRecord.formatAgo(lastLogin) + ")"));
         if (live != null) {
             sender.sendMessage(color("&7Status: &a🟢 ONLINE" + (live.isAfk() ? " &c[AFK]" : "")));
@@ -252,7 +327,8 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         return s.equalsIgnoreCase("reload") ||
                s.equalsIgnoreCase("reset") ||
                s.equalsIgnoreCase("webhook") ||
-               s.equalsIgnoreCase("help");
+               s.equalsIgnoreCase("help") ||
+               s.equalsIgnoreCase("top");
     }
 
     private String color(String s) {
@@ -265,14 +341,13 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             List<String> out = new ArrayList<>();
             out.add("help");
+            out.add("top");
             if (sender.hasPermission("staffstats.admin")) {
                 out.add("reload");
                 out.add("reset");
                 out.add("webhook");
             }
-            // gracze online + baza
-            Bukkit.getOnlinePlayers().forEach(p -> out.add(p.getName()));
-            db.getAll(30).forEach(r -> { if (!out.contains(r.name)) out.add(r.name); });
+            out.addAll(knownNames());
             String low = args[0].toLowerCase(Locale.ROOT);
             return out.stream()
                     .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(low))
@@ -282,17 +357,21 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
                     .collect(Collectors.toList());
         }
         if (args.length == 2) {
+            String low = args[1].toLowerCase(Locale.ROOT);
+            if (args[0].equalsIgnoreCase("top")) {
+                return tracker.getTrackedGroups().stream()
+                        .sorted()
+                        .filter(g -> g.startsWith(low))
+                        .collect(Collectors.toList());
+            }
             if (args[0].equalsIgnoreCase("reset") && sender.hasPermission("staffstats.admin")) {
-                return db.getAll(50).stream()
-                        .map(r -> r.name)
-                        .filter(n -> n.toLowerCase(Locale.ROOT).startsWith(args[1].toLowerCase(Locale.ROOT)))
+                return knownNames().stream()
+                        .filter(n -> n.toLowerCase(Locale.ROOT).startsWith(low))
                         .collect(Collectors.toList());
             }
             if (args[0].equalsIgnoreCase("webhook") && sender.hasPermission("staffstats.admin")) {
                 List<String> opts = new ArrayList<>(List.of("test", "daily", "schedule"));
-                db.getAll(30).forEach(r -> opts.add(r.name));
-                Bukkit.getOnlinePlayers().forEach(p -> { if (!opts.contains(p.getName())) opts.add(p.getName()); });
-                String low = args[1].toLowerCase(Locale.ROOT);
+                opts.addAll(knownNames());
                 return opts.stream()
                         .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(low))
                         .sorted()
@@ -301,4 +380,44 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         }
         return Collections.emptyList();
     }
+
+    /** Nazwy z cache 30 s (gracze online + baza) – bez zapytania do SQLite przy każdym TAB. */
+    private List<String> knownNames() {
+        long now = System.currentTimeMillis();
+        if (now - namesCacheAt > 30_000L) {
+            List<String> out = new ArrayList<>();
+            Bukkit.getOnlinePlayers().forEach(p -> out.add(p.getName()));
+            try {
+                db.getAll(50).forEach(r -> { if (r.name != null) out.add(r.name); });
+            } catch (Exception ignored) {}
+            namesCache = out;
+            namesCacheAt = now;
+        }
+        return namesCache;
+    }
+
+    // ===== cykl tygodniowy =====
+    private void sendWeeklyStatus(CommandSender sender, String label) {
+        var wr = plugin.getWeeklyReset();
+        boolean enabled = plugin.getConfig().getBoolean("weekly-reset.enabled", true);
+        sender.sendMessage(color("&6&l═══ Cykl tygodniowy ═══"));
+        sender.sendMessage(color("&7Status: " + (enabled ? "&aWŁĄCZONY" : "&cWYŁĄCZONY")));
+        if (!enabled) return;
+        int days = plugin.getConfig().getInt("weekly-reset.interval-days", 7);
+        String hour = String.format("%02d:%02d", plugin.getConfig().getInt("weekly-reset.at-hour", 4),
+                plugin.getConfig().getInt("weekly-reset.at-minute", 0));
+        sender.sendMessage(color("&7Interwał: &e" + days + " dni&7, docelowo o &e" + hour + " &8(Europe/Warsaw)"));
+        long next = wr != null ? wr.getNextResetAt() : 0L;
+        if (next > 0) {
+            long in = next - System.currentTimeMillis();
+            String inStr = in <= 0 ? "teraz!"
+                    : (in / 86_400_000L) + "d " + ((in % 86_400_000L) / 3_600_000L) + "h " + ((in % 3_600_000L) / 60_000L) + "m";
+            sender.sendMessage(color("&7Następny reset: &b" + inStr + " &8(" + wr.format(next) + ")"));
+        } else {
+            sender.sendMessage(color("&7Następny reset: &8brak kotwicy (ustawi się przy pierwszym cyklu)"));
+        }
+        boolean restart = plugin.getConfig().getBoolean("weekly-reset.restart-server", true);
+        sender.sendMessage(color("&7Restart po resecie: " + (restart ? "&aTAK" : "&cNIE")));
+    }
+
 }

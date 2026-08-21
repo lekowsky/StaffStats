@@ -1,0 +1,4 @@
+# Maven build output
+StaffStats/target/
+target/
+tools/__pycache__/
