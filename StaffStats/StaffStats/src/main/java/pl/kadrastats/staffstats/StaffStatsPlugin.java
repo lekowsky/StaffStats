@@ -114,8 +114,13 @@ public final class StaffStatsPlugin extends JavaPlugin {
         scheduleGuiRefresh();
         scheduleDailySummary();
 
-        weeklyReset = new WeeklyResetManager(this);
-        weeklyReset.schedule();
+        // Cykl tygodniowy – NIGDY nie może wyłączyć pluginu przy starcie
+        try {
+            weeklyReset = new WeeklyResetManager(this);
+            weeklyReset.schedule();
+        } catch (Exception e) {
+            getLogger().log(Level.WARNING, "[WeeklyReset] Nie udało się wystartować cyklu (plugin działa dalej): ", e);
+        }
 
         getLogger().info("StaffStats v" + getDescription().getVersion() + " enabled. /staff GUI ready.");
         if (webhook != null) {

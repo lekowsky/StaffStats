@@ -49,10 +49,15 @@ public class WeeklyResetManager {
             plugin.getLogger().info("[WeeklyReset] Wyłączony w configu (weekly-reset.enabled=false).");
             return;
         }
-        task = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::check, 20L * 30L, 20L * 60L);
-        plugin.getLogger().info("[WeeklyReset] Interwał: " + intervalDays() + " dni | następny reset: "
-                + format(getNextResetAt())
-                + " | restart serwera: " + (plugin.getConfig().getBoolean("weekly-reset.restart-server", true) ? "TAK" : "NIE"));
+        try {
+            task = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::check, 20L * 30L, 20L * 60L);
+            plugin.getLogger().info("[WeeklyReset] Interwał: " + intervalDays() + " dni | następny reset: "
+                    + format(getNextResetAt())
+                    + " | restart serwera: " + (plugin.getConfig().getBoolean("weekly-reset.restart-server", true) ? "TAK" : "NIE"));
+        } catch (Exception ex) {
+            // nawet jeśli nie udało się wystartować checker-a, plugin działa dalej
+            plugin.getLogger().log(Level.WARNING, "[WeeklyReset] schedule() error", ex);
+        }
     }
 
     public void stop() {
