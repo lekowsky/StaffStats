@@ -117,6 +117,34 @@ public class DatabaseManager {
                         PRIMARY KEY (uuid, ptype)
                     );
                     """);
+
+                // metadane pluginu (m.in. kotwica cyklu tygodniowego)
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS staff_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );
+                    """);
+
+                // archiwum zamkniętych tygodni (historia po resecie postępu)
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS staff_weeks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        week_start INTEGER NOT NULL,
+                        week_end INTEGER NOT NULL,
+                        uuid TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        group_name TEXT,
+                        playtime_ms INTEGER NOT NULL DEFAULT 0,
+                        afk_ms INTEGER NOT NULL DEFAULT 0,
+                        session_count INTEGER NOT NULL DEFAULT 0,
+                        bans INTEGER NOT NULL DEFAULT 0,
+                        mutes INTEGER NOT NULL DEFAULT 0,
+                        kicks INTEGER NOT NULL DEFAULT 0,
+                        warns INTEGER NOT NULL DEFAULT 0
+                    );
+                    """);
+                st.executeUpdate("CREATE INDEX IF NOT EXISTS idx_weeks_time ON staff_weeks(week_end DESC);");
             }
         }
     }
@@ -277,6 +305,83 @@ public class DatabaseManager {
         }
     }
 
+    // ===== META / CYKL TYGODNIOWY =====
+
+    public String getMetaValue(String key) {
+        synchronized (lock) {
+            try (PreparedStatement ps = connection.prepareStatement("SELECT value FROM staff_meta WHERE key = ?")) {
+                ps.setString(1, key);
+                try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return rs.getString("value"); }
+            } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "getMetaValue", e); }
+            return null;
+        }
+    }
+
+    public void setMetaValue(String key, String value) {
+        synchronized (lock) {
+            try (PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO staff_meta (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """)) {
+                ps.setString(1, key);
+                ps.setString(2, value);
+                ps.executeUpdate();
+            } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "setMetaValue", e); }
+        }
+    }
+
+    /** Czeka (max 10 s) aż kolejka zapisów async się wyczerpie – przed resetem tygodnia. */
+    public void flush() {
+        try {
+            asyncPool.submit(() -> {}).get(10, TimeUnit.SECONDS);
+        } catch (Exception ignored) {}
+    }
+
+    /** Kasuje CAŁY postęp kadry (reset tygodnia). Wywoływane po flush() i webhookie. */
+    public void wipeAllStats() {
+        synchronized (lock) {
+            String[] tables = {"staff_stats", "staff_sessions", "staff_afk", "staff_punishments"};
+            for (String t : tables) {
+                try (Statement st = connection.createStatement()) {
+                    st.executeUpdate("DELETE FROM " + t);
+                } catch (SQLException e) {
+                    plugin.getLogger().log(Level.WARNING, "wipe " + t, e);
+                }
+            }
+        }
+    }
+
+    /** Archiwizuje zamknięty tydzień do staff_weeks (historia zachowana po resecie). */
+    public void archiveWeek(long fromMs, long toMs, List<StaffRecord> top, Map<UUID, Map<String, Long>> punish) {
+        synchronized (lock) {
+            try (PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO staff_weeks (week_start, week_end, uuid, name, group_name,
+                        playtime_ms, afk_ms, session_count, bans, mutes, kicks, warns)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    """)) {
+                for (StaffRecord r : top) {
+                    Map<String, Long> p = punish.getOrDefault(r.uuid, Map.of());
+                    ps.setLong(1, fromMs);
+                    ps.setLong(2, toMs);
+                    ps.setString(3, r.uuid.toString());
+                    ps.setString(4, r.name);
+                    ps.setString(5, r.group);
+                    ps.setLong(6, r.totalPlaytimeMs);
+                    ps.setLong(7, r.totalAfkMs);
+                    ps.setInt(8, r.sessionCount);
+                    ps.setLong(9, p.getOrDefault("ban", 0L));
+                    ps.setLong(10, p.getOrDefault("mute", 0L));
+                    ps.setLong(11, p.getOrDefault("kick", 0L));
+                    ps.setLong(12, p.getOrDefault("warn", 0L));
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            } catch (SQLException e) {
+                plugin.getLogger().log(Level.WARNING, "archiveWeek failed", e);
+            }
+        }
+    }
+
     public void updateLogin(UUID uuid, String name, String group, long loginTs) {
         upsertSession(uuid, name, group, 0, 0, loginTs, 0, false);
     }
@@ -310,6 +415,29 @@ public class DatabaseManager {
             } catch (SQLException e) { plugin.getLogger().log(Level.WARNING, "getTop", e); }
             return list;
         }
+    }
+
+    /** Szukanie po nicku (do /staff <nick>). */
+    public List<StaffRecord> searchByName(String query, int limit) {
+        synchronized (lock) {
+            List<StaffRecord> out = new ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT * FROM staff_stats WHERE name LIKE ? COLLATE NOCASE ORDER BY total_playtime_ms DESC LIMIT ?")) {
+                ps.setString(1, "%" + query + "%");
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) out.add(map(rs));
+                }
+            } catch (SQLException e) {
+                plugin.getLogger().log(Level.WARNING, "searchByName", e);
+            }
+            return out;
+        }
+    }
+
+    /** Wariant getTop poza wątkiem głównym (do /staff top z czatu). */
+    public CompletableFuture<List<StaffRecord>> getTopAsync(String groupFilter, int limit) {
+        return CompletableFuture.supplyAsync(() -> getTop(groupFilter, limit), asyncPool);
     }
 
     public List<StaffRecord> getByGroup(String group) {

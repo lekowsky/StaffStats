@@ -327,6 +327,136 @@ public class WebhookManager {
         });
     }
 
+    /**
+     * Podsumowanie TYGODNIA – wysyłane SYNCHRONICZNIE (reset tygodnia może zaraz
+     * zrestartować serwer, webhook musi zdążyć przed wyłączeniem procesu).
+     */
+    public void sendWeeklySummary(List<StaffRecord> top,
+                                   java.util.Map<UUID, java.util.Map<String, Long>> punish,
+                                   long fromMs, long toMs, long nextResetMs) {
+        if (!isEnabled()) return;
+        try {
+            var db = plugin.getDatabase();
+            var tracker = plugin.getActivityTracker();
+
+            // uuid -> nick (do sekcji kar, których liderzy mogą nie być w top aktywności)
+            java.util.Map<UUID, String> names = new java.util.HashMap<>();
+            for (StaffRecord r : db.getAll(1000)) names.put(r.uuid, r.name);
+
+            JsonObject embed = new JsonObject();
+            embed.addProperty("title", "📊 Podsumowanie tygodnia kadry");
+            embed.addProperty("color", 15105570);
+            StringBuilder sb = new StringBuilder();
+            sb.append("**Okres:** <t:").append(fromMs / 1000).append(":f> – <t:").append(toMs / 1000).append(":f>\n");
+            sb.append("**Strefa:** Europe/Warsaw\n");
+            sb.append("🔄 *Statystyki tygodnia zostały zresetowane.*\n");
+
+            if (top.isEmpty()) {
+                sb.append("\n_Nikt z kadry nie był aktywny w tym tygodniu._\n");
+            } else {
+                sb.append("\n**⚡ TOP aktywność (tydzień):**\n");
+                int i = 1;
+                long sumPlay = 0, sumAfk = 0;
+                for (StaffRecord r : top) {
+                    if (i > 15) break;
+                    sumPlay += r.totalPlaytimeMs;
+                    sumAfk += r.totalAfkMs;
+                    double afkPerc = r.totalPlaytimeMs > 0 ? r.totalAfkMs * 100.0 / r.totalPlaytimeMs : 0;
+                    sb.append("**").append(i++).append(".** ").append(r.name)
+                            .append(" `[").append(r.group != null ? r.group : "?").append("]`")
+                            .append(" ⚡ **").append(StaffRecord.formatDuration(r.activeMs())).append("**")
+                            .append(" | ⏱ ").append(StaffRecord.formatDuration(r.totalPlaytimeMs))
+                            .append(String.format(java.util.Locale.US, " | 💤 %.0f%%", afkPerc))
+                            .append(" | sesji: ").append(r.sessionCount).append("\n");
+                    if (sb.length() > 3000) break;
+                }
+                sb.append("\n**Suma kadry:** ⏱ ").append(StaffRecord.formatDuration(sumPlay))
+                        .append(" | 💤 ").append(StaffRecord.formatDuration(sumAfk))
+                        .append(" | ⚡ ").append(StaffRecord.formatDuration(Math.max(0, sumPlay - sumAfk))).append("\n");
+            }
+
+            // TOP kary tygodnia
+            if (!punish.isEmpty()) {
+                List<java.util.Map.Entry<UUID, java.util.Map<String, Long>>> sorted = new java.util.ArrayList<>(punish.entrySet());
+                sorted.sort((a, b) -> Long.compare(
+                        b.getValue().values().stream().mapToLong(Long::longValue).sum(),
+                        a.getValue().values().stream().mapToLong(Long::longValue).sum()));
+                sb.append("\n**⚖ TOP kary (tydzień):**\n");
+                int shown = 0;
+                for (var entry : sorted) {
+                    if (shown >= 5 || sb.length() > 3700) break;
+                    var counts = entry.getValue();
+                    long total = counts.values().stream().mapToLong(Long::longValue).sum();
+                    if (total <= 0) continue;
+                    String name = names.getOrDefault(entry.getKey(), entry.getKey().toString().substring(0, 8));
+                    sb.append("**").append(++shown).append(".** ").append(name)
+                            .append(" – razem **").append(total).append("** • ")
+                            .append(pl.kadrastats.staffstats.util.PunishDisplay.loreLineDiscord(counts,
+                                    List.of("ban", "mute", "kick", "warn"))).append("\n");
+                }
+                if (shown == 0) sb.append("_Brak kar w tym tygodniu._\n");
+            }
+
+            // Nieobecni przez cały tydzień
+            try {
+                List<StaffRecord> inactive = db.getInactiveSince(fromMs, 10);
+                int shown = 0;
+                for (StaffRecord r : inactive) {
+                    if (tracker != null && tracker.getSession(r.uuid) != null) continue;
+                    if (shown == 0) sb.append("\n**😴 Nieobecni cały tydzień:**\n");
+                    sb.append("• ").append(r.name);
+                    if (r.group != null && !r.group.isBlank()) sb.append(" `[").append(r.group).append("]`");
+                    sb.append(" – ostatnio: ").append(StaffRecord.formatDate(r.lastLogin)).append("\n");
+                    shown++;
+                    if (shown >= 10 || sb.length() > 3900) break;
+                }
+            } catch (Exception ignored) {}
+
+            sb.append("\n**Następny reset:** <t:").append(nextResetMs / 1000).append(":F>");
+            embed.addProperty("description", sb.toString());
+            embed.addProperty("timestamp", Instant.now().toString());
+            sendEmbedSync(embed, "Weekly reset • StaffStats");
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "sendWeeklySummary failed", e);
+        }
+    }
+
+    /** Wysłanie embeda bez kolejki (inline) – dla webhooków, które MUSZĄ zdążyć przed restartem. */
+    private void sendEmbedSync(JsonObject embed, String footerText) {
+        HttpURLConnection con = null;
+        try {
+            JsonObject payload = new JsonObject();
+            payload.addProperty("username", username);
+            if (avatar != null && !avatar.isBlank()) payload.addProperty("avatar_url", avatar);
+            JsonArray embeds = new JsonArray();
+            if (footerText != null) {
+                JsonObject footer = new JsonObject();
+                footer.addProperty("text", footerText);
+                embed.add("footer", footer);
+            }
+            embeds.add(embed);
+            payload.add("embeds", embeds);
+
+            byte[] data = payload.toString().getBytes(StandardCharsets.UTF_8);
+            con = (HttpURLConnection) new URL(url).openConnection();
+            con.setRequestMethod("POST");
+            con.setDoOutput(true);
+            con.setConnectTimeout(5000);
+            con.setReadTimeout(5000);
+            con.setRequestProperty("Content-Type", "application/json");
+            con.setRequestProperty("User-Agent", "StaffStats/" + plugin.getDescription().getVersion() + " (+Purpur)");
+            try (OutputStream os = con.getOutputStream()) { os.write(data); }
+            int code = con.getResponseCode();
+            if (code < 200 || code >= 300) {
+                plugin.getLogger().warning("Weekly webhook HTTP " + code + " – sprawdź URL w config.yml");
+            }
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Webhook sync send failed", e);
+        } finally {
+            if (con != null) con.disconnect();
+        }
+    }
+
     public void shutdown() {
         if (pool == null) return;
         // czekaj do 3s na wysłanie zgromadzonych webhooków (shutdownNow gubiłby kolejkę)

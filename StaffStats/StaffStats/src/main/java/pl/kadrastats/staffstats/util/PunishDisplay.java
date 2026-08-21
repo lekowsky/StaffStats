@@ -51,6 +51,17 @@ public final class PunishDisplay {
         return sb.toString();
     }
 
+    /** Wariant bez kodów kolorów – do Discorda (webhook). */
+    public static String loreLineDiscord(Map<String, Long> counts, List<String> types) {
+        StringBuilder sb = new StringBuilder();
+        for (String[] style : STYLE) {
+            if (!types.contains(style[0])) continue;
+            if (sb.length() > 0) sb.append(" | ");
+            sb.append(style[0].toUpperCase(Locale.ROOT)).append(" ").append(counts.getOrDefault(style[0], 0L));
+        }
+        return sb.toString();
+    }
+
     /** Linie do raportu na czacie (pełne nazwy). */
     public static List<String> chatLines(Map<String, Long> counts, List<String> types) {
         List<String> out = new ArrayList<>();

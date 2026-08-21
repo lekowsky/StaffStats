@@ -9,6 +9,7 @@ import pl.kadrastats.staffstats.listener.PunishmentListener;
 import pl.kadrastats.staffstats.storage.DatabaseManager;
 import pl.kadrastats.staffstats.tracker.ActivityTracker;
 import pl.kadrastats.staffstats.util.LuckPermsHook;
+import pl.kadrastats.staffstats.util.WeeklyResetManager;
 import pl.kadrastats.staffstats.util.WebhookManager;
 
 import org.bukkit.Bukkit;
@@ -29,6 +30,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
     private WebhookManager webhook;
     private GuiListener guiListener;
     private PunishmentListener punishmentListener;
+    private WeeklyResetManager weeklyReset;
 
     private BukkitTask dailyTask;
     private BukkitTask periodicSaveTask;
@@ -112,6 +114,9 @@ public final class StaffStatsPlugin extends JavaPlugin {
         scheduleGuiRefresh();
         scheduleDailySummary();
 
+        weeklyReset = new WeeklyResetManager(this);
+        weeklyReset.schedule();
+
         getLogger().info("StaffStats v" + getDescription().getVersion() + " enabled. /staff GUI ready.");
         if (webhook != null) {
             getLogger().info("Webhook enabled=" + webhook.isEnabled() + " urlConfigured=" + getConfig().getBoolean("webhook.enabled"));
@@ -125,6 +130,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
         if (guiRefreshTask != null) { guiRefreshTask.cancel(); guiRefreshTask = null; }
         if (internalAfk != null) { internalAfk.stop(); }
         if (punishmentListener != null) { punishmentListener.shutdown(); }
+        if (weeklyReset != null) { weeklyReset.stop(); }
         // saveAllOnline wrzuca zapisy do kolejki async – database.shutdown() czeka na nie
         // (awaitTermination) przed zamknięciem połączenia, więc nic nie przepada.
         if (activityTracker != null) activityTracker.saveAllOnline(true);
@@ -158,6 +164,7 @@ public final class StaffStatsPlugin extends JavaPlugin {
         }
 
         // przepianuluj zadania cykliczne (config mógł zmienić interwały)
+        if (weeklyReset != null) weeklyReset.schedule();
         schedulePeriodicSave();
         scheduleGuiRefresh();
         scheduleDailySummary();
@@ -257,4 +264,5 @@ public final class StaffStatsPlugin extends JavaPlugin {
     public ActivityTracker getActivityTracker() { return activityTracker; }
     public LuckPermsHook getLuckPermsHook() { return luckPermsHook; }
     public WebhookManager getWebhook() { return webhook; }
+    public WeeklyResetManager getWeeklyReset() { return weeklyReset; }
 }

@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
  *   reload
  *   reset <gracz>
  *   webhook <test|daily|schedule|<nick>>
+ *   weekly <status|reset>  (cykl tygodniowy)
  *   help
  *
  * Użycie gracza:
@@ -70,6 +71,24 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         if (sub.equals("reload") && sender.hasPermission("staffstats.admin")) {
             plugin.reloadPlugin();
             sender.sendMessage(color("&aStaffStats przeładowano."));
+            return true;
+        }
+
+        // --- CYKL TYGODNIOWY (1.6.0) ---
+        if (sub.equals("weekly")) {
+            if (!sender.hasPermission("staffstats.admin")) {
+                sender.sendMessage(color("&cNie masz uprawnień (staffstats.admin)."));
+                return true;
+            }
+            String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+            switch (action) {
+                case "reset" -> {
+                    sender.sendMessage(color("&e[StaffStats] Wymuszam reset tygodnia..."));
+                    plugin.getWeeklyReset().forceReset(sender);
+                }
+                case "status" -> sendWeeklyStatus(sender, label);
+                default -> sender.sendMessage(color("&cUżycie: /" + label + " weekly <status|reset>"));
+            }
             return true;
         }
 
@@ -237,6 +256,8 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(color(" &7/" + label + " webhook daily &8- wymuś raport 24h"));
             sender.sendMessage(color(" &7/" + label + " webhook schedule &8- kiedy następny raport"));
             sender.sendMessage(color(" &7/" + label + " webhook <nick> &8- raport gracza na DC"));
+            sender.sendMessage(color(" &7/" + label + " weekly status &8- następny reset tygodnia"));
+            sender.sendMessage(color(" &7/" + label + " weekly reset &8- wymuś reset tygodnia"));
         }
         sender.sendMessage(color("&8&m----------------------------------"));
     }
@@ -374,4 +395,29 @@ public class StaffCommand implements CommandExecutor, TabCompleter {
         }
         return namesCache;
     }
+
+    // ===== cykl tygodniowy =====
+    private void sendWeeklyStatus(CommandSender sender, String label) {
+        var wr = plugin.getWeeklyReset();
+        boolean enabled = plugin.getConfig().getBoolean("weekly-reset.enabled", true);
+        sender.sendMessage(color("&6&l═══ Cykl tygodniowy ═══"));
+        sender.sendMessage(color("&7Status: " + (enabled ? "&aWŁĄCZONY" : "&cWYŁĄCZONY")));
+        if (!enabled) return;
+        int days = plugin.getConfig().getInt("weekly-reset.interval-days", 7);
+        String hour = String.format("%02d:%02d", plugin.getConfig().getInt("weekly-reset.at-hour", 4),
+                plugin.getConfig().getInt("weekly-reset.at-minute", 0));
+        sender.sendMessage(color("&7Interwał: &e" + days + " dni&7, docelowo o &e" + hour + " &8(Europe/Warsaw)"));
+        long next = wr != null ? wr.getNextResetAt() : 0L;
+        if (next > 0) {
+            long in = next - System.currentTimeMillis();
+            String inStr = in <= 0 ? "teraz!"
+                    : (in / 86_400_000L) + "d " + ((in % 86_400_000L) / 3_600_000L) + "h " + ((in % 3_600_000L) / 60_000L) + "m";
+            sender.sendMessage(color("&7Następny reset: &b" + inStr + " &8(" + wr.format(next) + ")"));
+        } else {
+            sender.sendMessage(color("&7Następny reset: &8brak kotwicy (ustawi się przy pierwszym cyklu)"));
+        }
+        boolean restart = plugin.getConfig().getBoolean("weekly-reset.restart-server", true);
+        sender.sendMessage(color("&7Restart po resecie: " + (restart ? "&aTAK" : "&cNIE")));
+    }
+
 }

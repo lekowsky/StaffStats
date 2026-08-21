@@ -1,137 +1,79 @@
-# StaffStats v1.5.0 - Purpur 1.21.10
-# Jedna komenda: /staff  - GUI z główkami (+ /staff top, kary z LibertyBans)
-# Autor: KadraStats
-# https://github.com/
+# ============================================================
+#  StaffStats v1.6.0 — konfiguracja
+#  /staff, /staff top, /staff weekly reset|status, /staff reload
+# ============================================================
 
-# === AUTO-UPDATE CONFIG ===
-# true = po wgraniu nowego JARa automatycznie dopisze brakujące opcje do config.yml
-# robi backup: config.yml.backup-YYYYMMDD-HHMMSS
-config-auto-update: true
-# UWAGA: true = CAŁKOWICIE nadpisze config.yml plikiem z JARa przy starcie (zrobi backup!)
-# Ustaw na true tylko jeśli chcesz zresetować config do domyślnego
-config-force-overwrite: false
+# Co ile minut statystyki online są zapisywane do bazy
+save-interval-minutes: 5
 
-# Rangi LuckPerms do śledzenia
+# Które grupy są traktowane jako kadra (LuckPerms)
 tracked-groups:
-  - "wlasciciel"
-  - "headadmin"
-  - "admin"
-  - "mod"
-  - "moderator"
-  - "kidmod"
-  - "helper"
-  - "pomocnik"
-  - "jrhelper"
-  - "architekt"
-  - "builder"
+  - helper
+  - kidmod
+  - mod
+  - admin
+  - headadmin
+  - wlasciciel
 
-# Priorytet sortowania (wyższy = wyżej w GUI)
-# używane też do sortowania głów w GUI – pobierane z LuckPerms primary group
+# Kolejność/priorytet grup przy wyświetlaniu (wyższa = wyżej)
 group-priority:
   wlasciciel: 100
   headadmin: 90
   admin: 80
-  moderator: 70
-  mod: 70
-  kidmod: 65
-  helper: 60
-  pomocnik: 60
-  jrhelper: 50
-  architekt: 40
-  builder: 40
-  default: 10
+  mod: 60
+  kidmod: 50
+  helper: 40
 
-track-only-listed-groups: true
+# Po ilu minutach braku aktywności gracz jest oznaczany jako AFK
+afk-threshold-minutes: 5
 
-# GUI
+# Wygląd GUI
 gui:
-  title: "&8&lKADRA &7- Statystyki"
-  rows: 6
-  # true = każde otwarcie GUI czyta świeże dane z bazy
-  # false = używa cache do 5s (mniejsze obciążenie przy spamie /staff)
-  refresh-on-open: true
-  # true = pokazuj też osoby offline; false = tylko aktualnie online
-  show-offline-heads: true
-  # Live-refresh otwartego GUI w sekundach (0 = wyłączony)
-  live-refresh-seconds: 5
-  # click = pełny raport na chacie
-  click-to-report: true
+  title: "Statystyki Kadry"
+  size: 54
+  live-refresh-seconds: 10
 
-integrations:
-  luckperms: true
-  essentials-afk: true
-  # Wbudowany detektor AFK (fallback gdy NIE masz EssentialsX).
-  # Aktywny tylko gdy hook EssentialsX nie działa (ustaw essentials-afk: false aby go wymusić).
-  internal-afk-detector: false
-  # Po ilu minutach bezruchu oznaczyć kadrę jako AFK
-  internal-afk-timeout-minutes: 10
-
-# === LibertyBans – statystyki kar kadry ===
-# Zlicza kary WYDANE przez śledzoną kadrę (mute/kick/warn/ban) - event PostPunishEvent.
-# Liczone są WSZYSTKIE typy niezależnie od rangi (dane nie psują się przy zmianie rangi),
-# a poniższa mapa kontroluje tylko CO jest WYŚWIETLANE danej rangi.
-libertybans:
-  enabled: true
-  # Widok kar per ranga. Dostępne typy: mute, kick, warn, ban
-  group-punishment-view:
-    helper: ["mute", "kick"]
-    kidmod: ["mute", "kick", "ban"]
-    moderator: ["mute", "kick", "ban"]
-    admin: ["mute", "kick", "ban"]
-    headadmin: ["mute", "kick", "ban", "warn"]
-    wlasciciel: ["mute", "kick", "ban", "warn"]
-    # rangi niewymienione powyżej używają "default" (puste = bez statystyk kar)
-    default: []
-
-# Discord Webhook
-# Tylko dzienny raport o 22:00 – kto był aktywny w ciągu 24h
+# Webhook Discord (dzienny raport aktywności + podsumowanie tygodnia)
 webhook:
   enabled: false
-  # Wklej URL webhooka z Discorda tutaj:
-  url: "https://discord.com/api/webhooks/TWOJE_ID/TWOJ_TOKEN"
+  url: ""
   username: "StaffStats"
-  avatar-url: "https://i.imgur.com/8Km9tLL.png"
-  # Wyłączone - tylko daily summary
-  send-on-staff-join: false
-  send-on-staff-quit: false
-  # Podsumowanie dzienne o danej godzinie (Europe/Warsaw), -1 = wyłącz
-  daily-summary-hour: 22
-  daily-summary-minute: 0
-  # Minimalna długość sesji żeby wysłać quit webhook (minuty)
-  min-quit-session-minutes: 5
-  # Kolor embedów
-  color-join: 65280
-  color-quit: 16711680
+  avatar: ""
+  # Codzienny raport o której godzinie (0-23, strefa Europe/Warsaw)
+  daily-summary-hour: 21
 
-storage:
-  type: sqlite
-  async-writes: true
-  # Co ile minut dopisywać czas online do bazy (ochrona przed utratą danych
-  # przy crash serwera; 0 = wyłączone). Zalecane: 15.
-  periodic-save-minutes: 15
+# LibertyBans — liczniki kar (mute/kick/warn/ban)
+libertybans:
+  enabled: true
+  # Które typy kar widzi dana ranga (widok dostosowany do uprawnień)
+  group-punishment-view:
+    default: [mute, kick]
+    helper: [mute, kick]
+    kidmod: [mute, kick, ban]
+    mod: [mute, kick, ban]
+    admin: [mute, kick, ban, warn]
+    headadmin: [mute, kick, ban, warn]
+    wlasciciel: [mute, kick, ban, warn]
 
-performance:
-  luckperms-cache-ms: 30000
-  command-cooldown-seconds: 2
-  max-top-results: 54
-  min-session-seconds: 30
+# ===== CYKL TYGODNIOWY =====
+# Automatyczny reset CAŁEGO postępu kadry (czasy, sesje, AFK, kary)
+# co interval-days dni + restart serwera + webhook z podsumowaniem
+# tygodnia (TOP aktywność, TOP kary, nieobecni). Historia zapisuje
+# się w tabeli staff_weeks (archiwum tygodni).
+weekly-reset:
+  enabled: true
+  # Co ile dni odbywa się reset (minimum 1)
+  interval-days: 7
+  # O której godzinie (strefa Europe/Warsaw) — reset przesuwa się
+  # na najbliższą pełną godzinę at-hour:at-minute po upływie interwału
+  at-hour: 4
+  at-minute: 0
+  # Czy po resecie zrestartować serwer (zalecane — czyści np. cache)
+  restart-server: true
+  # Komenda restartu wykonana z konsoli (np. "restart" / "stop")
+  restart-command: "restart"
+  # Czy wysłać webhook z podsumowaniem tygodnia PRZED resem (zalecane)
+  send-webhook: true
 
-notifications:
-  staff-join-notify: false
-  staff-quit-notify: false
-  notify-permission: "staffstats.notify"
-  respect-vanish: true
-
-security:
-  # Logowanie anomalii statystyk do konsoli (przycięte sesje, ujemne czasy, AFK > sesja)
-  anti-cheat-logging: true
-  max-session-hours: 24
-  enable-bypass-permission: true
-
-messages:
-  prefix: "&8[&bStaffStats&8] &7"
-  no-permission: "&cBrak uprawnień."
-  player-not-tracked: "&cTen gracz nie jest w kadrze."
-  gui-opening: "&7Otwieram panel kadry..."
-  report-header: "&8&m--------&r &b&lRAPORT &8&m--------"
-  top-header: "&8&m----------&r &b&lTOP KADRY &8&m----------"
+# Automatyczna aktualizacja configu przy nowszej wersji pluginu
+config-auto-update: true
